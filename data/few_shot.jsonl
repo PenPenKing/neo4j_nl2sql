@@ -1,0 +1,30 @@
+{"question": "查询所有故障模式", "cypher": "MATCH (f:Fault_Mode) RETURN f.name LIMIT 50"}
+{"question": "查询所有硬件组件", "cypher": "MATCH (h:Hardware_Component) RETURN h.name LIMIT 50"}
+{"question": "科学载荷管理器工作电流异常相关故障有哪些", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '科学载荷管理器' AND f.name CONTAINS '工作电流异常' RETURN f.name"}
+{"question": "查询电源相关的故障模式", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '电源' RETURN f.name LIMIT 30"}
+{"question": "查询CPU相关的故障有哪些", "cypher": "MATCH (f:Fault_Mode)-[:OCCURS_ON]->(h:Hardware_Component) WHERE h.name CONTAINS 'CPU' RETURN f.name, h.name"}
+{"question": "查询FPGA相关的硬件组件", "cypher": "MATCH (h:Hardware_Component) WHERE h.name CONTAINS 'FPGA' RETURN h.name"}
+{"question": "哪些故障会导致科学载荷管理器工作电流异常", "cypher": "MATCH (f1:Fault_Mode)-[:CAUSES]->(f2:Fault_Mode) WHERE f2.name CONTAINS '科学载荷管理器' AND f2.name CONTAINS '工作电流异常' RETURN f1.name, f2.name"}
+{"question": "科学载荷管理器由哪些硬件组件组成", "cypher": "MATCH (h1:Hardware_Component)-[:PART_OF]->(h2:Hardware_Component) WHERE h2.name = '科学载荷管理器' RETURN h1.name, h2.name"}
+{"question": "查询CAN总线相关的故障", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS 'CAN总线' RETURN f.name"}
+{"question": "查询所有会导致电源故障的原因", "cypher": "MATCH (f:Fault_Mode)-[:CAUSES]->(p:Fault_Mode) WHERE p.name CONTAINS '电源' RETURN f.name, p.name"}
+{"question": "正负15V电源相关的故障有哪些", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '正负15V电源' RETURN f.name"}
+{"question": "查询与+5V电源相关的硬件组件", "cypher": "MATCH (h:Hardware_Component) WHERE h.name CONTAINS '+5V电源' RETURN h.name"}
+{"question": "哪些故障需要开机状态才能发生", "cypher": "MATCH (f:Fault_Mode)-[:REQUIRES_STATE]->(s:System_State) RETURN f.name, s.name"}
+{"question": "FLASH存储相关的故障有哪些", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS 'FLASH' RETURN f.name"}
+{"question": "查询软件模块与硬件组件的依赖关系", "cypher": "MATCH (s:Software_Module)-[:DEPENDS_ON]->(h:Hardware_Component) RETURN s.name, h.name"}
+{"question": "极紫外相机相关的故障有哪些", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '极紫外相机' RETURN f.name"}
+{"question": "查询LVDS数据相关的故障", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS 'LVDS' RETURN f.name"}
+{"question": "哪些故障模式被遥测信号检测", "cypher": "MATCH (f:Fault_Mode)-[:DETECTED_BY]->(t:Telemetry_Signal) RETURN f.name, t.name"}
+{"question": "查询工作电流异常相关的硬件组件", "cypher": "MATCH (f:Fault_Mode)-[:OCCURS_ON]->(h:Hardware_Component) WHERE f.name CONTAINS '工作电流异常' RETURN DISTINCT h.name"}
+{"question": "霍尔电流传感器相关的故障有哪些", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '霍尔电流传感器' RETURN f.name"}
+{"question": "查询与CPU最小系统相关的故障", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS 'CPU最小系统' RETURN f.name"}
+{"question": "哪些故障会导致CAN总线通讯异常", "cypher": "MATCH (f:Fault_Mode)-[:CAUSES]->(c:Fault_Mode) WHERE c.name CONTAINS 'CAN总线通讯异常' RETURN f.name"}
+{"question": "查询所有传感器相关的硬件组件", "cypher": "MATCH (h:Hardware_Component) WHERE h.name CONTAINS '传感器' RETURN h.name"}
+{"question": "科学载荷分系统内单机工作电流异常的原因是什么", "cypher": "MATCH (f:Fault_Mode)-[:CAUSES]->(c:Fault_Mode) WHERE f.name = '科学载荷分系统内单机工作电流异常' RETURN f.name, c.name"}
+{"question": "查询电源故障的传播链", "cypher": "MATCH (f1:Fault_Mode)-[:CAUSES]->(f2:Fault_Mode) WHERE f1.name CONTAINS '电源' RETURN f1.name, f2.name LIMIT 20"}
+{"question": "查询与BOOT启动异常相关的故障", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS 'BOOT启动异常' RETURN f.name"}
+{"question": "哪些硬件组件属于科学载荷管理器", "cypher": "MATCH (h:Hardware_Component)-[:PART_OF*1..2]->(m:Hardware_Component) WHERE m.name = '科学载荷管理器' RETURN DISTINCT h.name"}
+{"question": "查询遥测输出电路相关的故障", "cypher": "MATCH (f:Fault_Mode) WHERE f.name CONTAINS '遥测输出电路' RETURN f.name"}
+{"question": "FPGA未正常加载会导致哪些故障", "cypher": "MATCH (c:Fault_Mode)-[:CAUSES]->(f:Fault_Mode) WHERE c.name CONTAINS 'FPGA未正常加载' RETURN c.name, f.name"}
+{"question": "查询所有软件模块", "cypher": "MATCH (s:Software_Module) RETURN s.name"}

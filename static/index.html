@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neo4j 自然语言查询</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <header class="header">
+      <h1>Neo4j NL2Cypher</h1>
+      <p class="subtitle">输入自然语言问题，后端生成 Cypher 并执行</p>
+    </header>
+
+    <section class="panel input-panel">
+      <label for="question">问题</label>
+      <textarea
+        id="question"
+        rows="4"
+        placeholder="例如：查询与工作电流相关的故障模式有哪些？"
+      ></textarea>
+      <div class="actions">
+        <button type="button" id="submit" class="btn primary">提交查询</button>
+        <span id="status" class="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section id="error-box" class="panel error hidden" role="alert"></section>
+
+    <section id="result" class="result hidden">
+      <div class="panel block">
+        <h2>1. 精准匹配关键词</h2>
+        <div id="kw-exact" class="tags"></div>
+      </div>
+      <div class="panel block">
+        <h2>2. 向量检索（图谱类型/关系）</h2>
+        <div id="kw-vector" class="tags"></div>
+      </div>
+      <div class="panel block">
+        <h2>3. 向量检索示范（few-shot）</h2>
+        <div id="fewshots" class="fewshots"></div>
+      </div>
+      <div class="panel block">
+        <h2>4. Agent 生成的 Cypher</h2>
+        <pre id="cypher" class="code"></pre>
+      </div>
+      <div class="panel block">
+        <h2>执行结果</h2>
+        <p class="meta">
+          状态：<strong id="exec-status"></strong>
+          <span class="sep">|</span>
+          行数：<strong id="exec-count"></strong>
+          <span class="sep">|</span>
+          失败重试次数：<strong id="failure-count"></strong>
+        </p>
+        <p id="exec-err" class="err-line hidden"></p>
+        <div class="table-wrap">
+          <table id="data-table" class="data-table hidden">
+            <thead id="data-thead"></thead>
+            <tbody id="data-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
