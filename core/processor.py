@@ -1,10 +1,14 @@
 import json
+import logging
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
@@ -26,6 +30,149 @@ DATA_SCHEMA_TERMS = _root / "data" / "schema_terms.txt"
 DATA_SCHEMA_VECTOR_DOCS = _root / "data" / "schema_vector_docs.jsonl"
 
 
+@lru_cache(maxsize=256)
+def _cached_embed_query(query: str) -> np.ndarray:
+    """查询向量 LRU 缓存，避免重复计算同一问题的向量。"""
+    emb = OllamaEmbeddings(
+        model=settings.ollama_embed_model,
+        base_url=settings.ollama_base_url,
+    )
+    vec = emb.embed_query(query)
+    return np.asarray(vec, dtype=np.float64)
+
+
+class SchemaVectorStore:
+    """
+    文档向量预计算 + 查询向量缓存
+    启动时一次性加载并计算所有文档向量，之后检索只查缓存
+    """
+
+    def __init__(self):
+        self._schema_docs: List[Dict[str, Any]] = []
+        self._schema_vectors: Optional[np.ndarray] = None
+        self._few_shot_docs: List[Dict[str, Any]] = []
+        self._few_shot_vectors: Optional[np.ndarray] = None
+        self._initialized = False
+
+    def _load_schema_vector_docs(self) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        if not DATA_SCHEMA_VECTOR_DOCS.exists():
+            return rows
+        with open(DATA_SCHEMA_VECTOR_DOCS, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return rows
+
+    def _load_few_shot_records(self) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        if not DATA_FEW_SHOT.exists():
+            return rows
+        with open(DATA_FEW_SHOT, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return rows
+
+    def initialize(self) -> None:
+        """启动时调用，一次性预计算所有文档向量。"""
+        if self._initialized:
+            return
+
+        logger.info("SchemaVectorStore 开始初始化...")
+
+        # 加载文档
+        self._schema_docs = self._load_schema_vector_docs()
+        self._few_shot_docs = self._load_few_shot_records()
+
+        emb = OllamaEmbeddings(
+            model=settings.ollama_embed_model,
+            base_url=settings.ollama_base_url,
+        )
+
+        # schema docs 向量预计算
+        if self._schema_docs:
+            schema_texts = [str(d.get("text") or "") for d in self._schema_docs]
+            vecs = emb.embed_documents(schema_texts)
+            self._schema_vectors = np.asarray(vecs, dtype=np.float64)
+            logger.info(f"schema 向量预计算完成: {self._schema_vectors.shape}")
+
+        # few-shot 向量预计算
+        if self._few_shot_docs:
+            few_texts = [
+                str(r.get("question") or r.get("text") or r.get("q") or "")
+                for r in self._few_shot_docs
+            ]
+            vecs = emb.embed_documents(few_texts)
+            self._few_shot_vectors = np.asarray(vecs, dtype=np.float64)
+            logger.info(f"few-shot 向量预计算完成: {self._few_shot_vectors.shape}")
+
+        self._initialized = True
+        logger.info("SchemaVectorStore 初始化完成")
+
+    def _cosine_topk(
+        self,
+        query_vec: np.ndarray,
+        doc_vectors: np.ndarray,
+        records: List[Dict[str, Any]],
+        k: int,
+    ) -> List[Dict[str, Any]]:
+        """给定查询向量和已预计算的文档向量矩阵，返回 top-k 结果。"""
+        if doc_vectors is None or len(records) == 0:
+            return []
+        if len(records) <= k:
+            return [{**r, "_similarity": 1.0} for r in records[:k]]
+
+        norms_d = np.linalg.norm(doc_vectors, axis=1)
+        norm_q = np.linalg.norm(query_vec)
+        sims = (doc_vectors @ query_vec) / (norms_d * norm_q + 1e-9)
+        top_indices = np.argsort(-sims)[:k]
+
+        return [
+            {**records[int(i)], "_similarity": float(sims[int(i)])}
+            for i in top_indices
+        ]
+
+    def search_schema(
+        self, query: str, k: int = 3
+    ) -> List[Dict[str, Any]]:
+        """向量检索 schema docs，返回 top-k + similarity。"""
+        if not self._initialized:
+            self.initialize()
+        qv = _cached_embed_query(query)
+        return self._cosine_topk(qv, self._schema_vectors, self._schema_docs, k)
+
+    def search_few_shot(
+        self, query: str, k: int = 2
+    ) -> List[Dict[str, Any]]:
+        """向量检索 few-shot，返回 top-k + similarity。"""
+        if not self._initialized:
+            self.initialize()
+        qv = _cached_embed_query(query)
+        return self._cosine_topk(qv, self._few_shot_vectors, self._few_shot_docs, k)
+
+
+# 全局单例，agent 复用
+_vector_store: Optional[SchemaVectorStore] = None
+
+
+def get_vector_store() -> SchemaVectorStore:
+    global _vector_store
+    if _vector_store is None:
+        _vector_store = SchemaVectorStore()
+    return _vector_store
+
+
 def _load_schema_text() -> str:
     if not DATA_SCHEMA.exists():
         return "（未找到 schema.json，请先运行 preprocess 导出。）"
@@ -37,68 +184,6 @@ def _load_schema_text() -> str:
         return f"（读取 schema.json 失败: {e}）"
 
 
-def _load_schema_vector_docs() -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    if not DATA_SCHEMA_VECTOR_DOCS.exists():
-        return rows
-    with open(DATA_SCHEMA_VECTOR_DOCS, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
-
-
-def _load_few_shot_records() -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    if not DATA_FEW_SHOT.exists():
-        return rows
-    with open(DATA_FEW_SHOT, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
-
-
-def _rank_by_cosine_embedding(
-    query: str,
-    records: List[Dict[str, Any]],
-    text_getter,
-    k: int,
-) -> List[Dict[str, Any]]:
-    """对 records 按与 query 的向量余弦相似度排序，返回前 k 条并附带 _similarity。"""
-    if not records:
-        return []
-    if len(records) <= k:
-        return [{**r, "_similarity": 1.0} for r in records[:k]]
-    texts = [text_getter(r) for r in records]
-    try:
-        emb = OllamaEmbeddings(
-            model=settings.ollama_embed_model,
-            base_url=settings.ollama_base_url,
-        )
-        qv = np.asarray(emb.embed_query(query), dtype=np.float64)
-        doc_m = np.asarray(emb.embed_documents(texts), dtype=np.float64)
-        norms_q = np.linalg.norm(qv)
-        norms_d = np.linalg.norm(doc_m, axis=1)
-        sims = (doc_m @ qv) / (norms_d * norms_q + 1e-9)
-        top = np.argsort(-sims)[:k]
-        out: List[Dict[str, Any]] = []
-        for i in top:
-            ii = int(i)
-            out.append({**records[ii], "_similarity": float(sims[ii])})
-        return out
-    except Exception:
-        return [{**r, "_similarity": 0.0} for r in records[:k]]
 
 
 def _schema_hit_keyword_line(doc: Dict[str, Any]) -> str:
@@ -112,21 +197,17 @@ def _schema_hit_keyword_line(doc: Dict[str, Any]) -> str:
 
 
 def _select_few_shots_by_embedding(
-    query: str, records: List[Dict[str, Any]], k: int = 2
+    query: str, k: int = 2
 ) -> List[Dict[str, Any]]:
-    def _text(r: Dict[str, Any]) -> str:
-        return str(r.get("question") or r.get("text") or r.get("q") or "")
-
-    return _rank_by_cosine_embedding(query, records, _text, k)
+    """通过向量缓存检索 few-shot 示例。"""
+    return get_vector_store().search_few_shot(query, k)
 
 
 def _select_schema_docs_by_embedding(
-    query: str, docs: List[Dict[str, Any]], k: int = 3
+    query: str, k: int = 3
 ) -> List[Dict[str, Any]]:
-    def _text(d: Dict[str, Any]) -> str:
-        return str(d.get("text") or "")
-
-    return _rank_by_cosine_embedding(query, docs, _text, k)
+    """通过向量缓存检索 schema docs。"""
+    return get_vector_store().search_schema(query, k)
 
 
 def _format_few_shots(examples: List[Dict[str, Any]]) -> str:
@@ -195,11 +276,9 @@ def node_retrieve(state: GraphState) -> GraphState:
     q = state.get("user_query") or ""
     retriever = SchemaRetriever(str(DATA_SCHEMA_TERMS))
     keywords = retriever.get_matched_schema(q)
-    schema_vec_docs = _load_schema_vector_docs()
-    schema_hits = _select_schema_docs_by_embedding(q, schema_vec_docs, k=3)
+    schema_hits = _select_schema_docs_by_embedding(q, k=3)
     vector_schema_keywords = [_schema_hit_keyword_line(h) for h in schema_hits]
-    few_records = _load_few_shot_records()
-    few = _select_few_shots_by_embedding(q, few_records, k=2)
+    few = _select_few_shots_by_embedding(q, k=2)
     schema_text = _load_schema_text()
     sys_content = _build_system_prompt(
         {
@@ -317,6 +396,8 @@ class CypherAgent:
 
     def __init__(self):
         self.graph = build_graph()
+        # 预热向量存储（启动时一次性计算所有文档向量）
+        get_vector_store().initialize()
 
     def run(self, user_query: str) -> Dict[str, Any]:
         out: GraphState = self.graph.invoke({"user_query": user_query})
